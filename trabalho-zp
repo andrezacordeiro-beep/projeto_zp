@@ -1,0 +1,224 @@
+
+
+# BIBLIOTECAS ESSENCIAIS
+
+import pandas as pd
+import numpy as np
+from datetime import datetime
+
+"""Modulos necessários do Python
+- Pandas
+- Openpyxl
+"""
+
+"""SCRIPT DE ETL E LIMPEZA DE DADOS - GRUPO TETRIS
+Objetivo: Padronizar, sanear e imputar dados de vendas para relatórios gerenciais.
+Regras Principais: 
+    - Conversão de valores negativos.
+    - Imputação de valores padrão para campos vazios (Data, Região, Canal, Produto).
+    - Descarte de vendas com valor zero ou fora do range financeiro.
+"""
+
+print("Iniciando o processo de limpeza de dados do Grupo Tetris.")
+
+# ============================================================
+# 1. CARREGAMENTO DOS DADOS (EXTRATAÇÃO)
+#    Objetivo: Importar a base bruta (raw) e registrar o volume inicial.
+# ============================================================  
+
+caminho_entrada = r"dados\nao_processados\tabela_vendas_zp_mai26.xlsx"  
+zp = pd.read_excel(caminho_entrada)
+
+total_original = len(zp)
+print(f"Quantidade de linhas antes da limpeza: {total_original}")
+
+print("1. Padronizando IDs de venda.")
+
+zp["id_venda"] = (
+    zp["id_venda"]
+    .astype(str)
+    .str.strip()
+) # Converte para string e remove espaços extras
+
+# ============================================================
+# 2. SANEAMENTO FINANCEIRO (valor_R$_cx)
+#    Objetivo: Tratar anomalias monetárias.
+#    Lógica: Converter negativos em positivos e invalidar zeros/absurdos.
+# ============================================================
+
+print("2.1. Removendo linhas totalmente vazias")
+zp = zp.dropna(how="all") # Remove linhas onde todas as colunas estão vazias
+
+print("2.2. Ajustando valores negativos na coluna 'Valor_R$_cx'. Caso eles sejam negativos, transforma em positivo.")
+# Ajuste de sinal: Valores negativos são tratados como erros de entrada e corrigidos
+zp["valor_R$_cx"] = zp["valor_R$_cx"].abs()
+
+VALORES_VALIDOS = [27.89, 35.50]
+
+print(f"2.3. Se o valor for 0 ou fora do range aceitável {VALORES_VALIDOS[0]} ou {VALORES_VALIDOS[1]}, marcamos para exclusão.")
+# Filtro de Integridade: Se o valor for 0 ou fora do range aceitável, marcamos para exclusão
+zp.loc[
+    ~zp["valor_R$_cx"].isin(VALORES_VALIDOS),
+    "valor_R$_cx"
+] = np.nan 
+
+# ============================================================
+# 3. NORMALIZAÇÃO DE TEXTO
+#    Objetivo: Eliminar variações de case (MAIÚSCULO/minúsculo) e espaços extras.
+# ============================================================
+print("3. Ajustando os textos para padronizar os campos (regiao, canal e produto).")
+colunas_texto = ["regiao", "canal", "produto"]
+for col in colunas_texto:
+    zp[col] = zp[col].apply(
+        lambda x: x.strip().title() if isinstance(x, str) else x
+    ) # Remove espaços extras e padroniza para título (primeira letra maiúscula)      
+print(zp.head(5))
+
+#===========================================================
+# 4. TRATAMENTO DE DICIONÁRIOS E PRECEDÊNCIA
+#    Objetivo: Unificar nomes de cidades, corrigir erros de digitação
+#    e aplicar a regra de precedência para produtos mistos.
+# ============================================================
+
+# Mapeamento de Regiões: Define qual região domina em combos de texto
+print("4.1 Corrigindo nomes de região que estavam divergentes.")
+correcao_regiao = {
+    "Joinvile": "Joinville", "Florianopólis": "Florianópolis",
+    "Florianopolis": "Florianópolis"
+}
+zp["regiao"] = zp["regiao"].replace(correcao_regiao)
+
+# Retirar as regiões indesejadas 
+print("4.2 Remoção de regiões fora do padrão.")
+regioes_para_remover = ['Montevidéu', 'Desconhecido', 
+    'Sudeste', 'Sul', 'Nordeste', 'Centro-Oeste', 'Norte'
+]
+zp = zp[~zp['regiao'].isin(regioes_para_remover)]
+
+# Filtrar para manter apenas o que for da região "Zp"
+zp = zp[zp['regiao'] == 'Zp']
+
+
+# Mapeamento de Produtos: Define qual produto domina em combos de texto
+print("4.3 Ajustando variações de nomes de produtos para um padrão único.")
+correcao_produto = {
+    "Rolhhas": "Rolha", "Rol": "Rolha", "Rolhas": "Rolha",
+    "Pacoca": "Paçoca", "Paçocca": "Paçoca",
+    "Paçoca E Rolha": "Paçoca", "Pac": "Paçoca"
+}
+zp["produto"] = zp["produto"].replace(correcao_produto)
+
+# Retirar o produto "Caixa De 100" usando a nova variável
+
+print("4.4 Retirando produto Caixa De 100.")
+zp = zp[zp['produto'] != 'Caixa De 100']
+
+
+# Mapeamento de Canais: Unifica variações de canais de venda para um padrão único
+print("4.5 Unificando variações de canais de venda para um padrão único.")
+correcao_canal = {
+    "E-Commerc": "E-Commerce", "Site": "E-Commerce",
+    "Balcão": "Loja Física", "Loja Fisíca": "Loja Física",
+    "Loja Fisica": "Loja Física"
+}
+zp["canal"] = zp["canal"].replace(correcao_canal)
+
+#===========================================================
+# 5. PADRONIZAÇÃO DE DATAS
+#    Objetivo: Padronização de datas
+# ============================================================
+
+# Verificado que as datas (data_venda). Hoje está com o tipo string. Convertido para o formato 
+
+print("5. Ajustado a data para ser convertida de string para tipo datetime.")
+
+zp['data_venda'] = pd.to_datetime(
+    zp['data_venda'],
+    format='mixed',
+    dayfirst=True,
+    errors='coerce'
+)
+
+# ============================================================
+# 6. VALIDAÇÃO DE UNIDADES VENDIDAS
+#    Regra: quantidade deve ser inteiro positivo (> 0).
+# ============================================================
+
+print("6. Ajustando as quantidades do campo 'unidades_vendidas'. Essas quantidades devem ser maiores que zero.")
+zp["unidades_vendidas_cx"] = pd.to_numeric(zp["unidades_vendidas_cx"], errors="coerce")
+zp.loc[zp["unidades_vendidas_cx"] <= 0, "unidades_vendidas_cx"] = np.nan
+
+# ============================================================
+# 7. TRATAMENTO DE NULOS EM CAMPOS CATEGÓRICOS
+#    Política: registros sem produto/canal são descartados (crítico).
+#    Região sem valor recebe "Desconhecido".
+# ============================================================
+
+print("7. Descartadas linhas onde o produto/canal não estão informados.")
+zp = zp.dropna(subset=["produto", "canal"])
+
+print("7.1. Ajustadas campo 'regiao' sem valor para 'Desconhecido'")
+zp["regiao"] = zp["regiao"].fillna("Desconhecido")
+
+# ============================================================
+# 8. REMOÇÃO DE DUPLICADOS
+#   Critério: ID de venda deve ser único. Mantém-se a primeira ocorrência.
+#   Justificativa: Duplicados podem distorcer análises de vendas e receita.
+# ============================================================
+print("8. Removendo registros duplicados baseados no ID da Venda.")
+# Mantém apenas a primeira ocorrência do ID único [1]
+zp = zp.drop_duplicates(subset=['id_venda'], keep='first')
+
+# ============================================================
+# 9. MARCAÇÃO DE INCONSISTÊNCIAS E LIMPEZA FINAL
+#    Estratégia: Criar uma coluna de flag para marcar registros com erros críticos.
+#    Registros com flags são exportados para um log de inconsistências e depois removidos da base final.
+# ============================================================
+print("9. Criando a coluna de flag para registros com erros críticos.")
+zp['flag_inconsistencia'] = ""
+
+# Marca datas inválidas (NaT) ou preços fora do padrão (NaN) [2, 3]
+zp.loc[zp['data_venda'].isna(), 'flag_inconsistencia'] += "Data Inválida; "
+zp.loc[zp['valor_R$_cx'].isna(), 'flag_inconsistencia'] += "Preço Inconsistente; "
+zp.loc[zp['unidades_vendidas_cx'].isna(), 'flag_inconsistencia'] += "Qtd Inválida; "
+
+# Opcional: Salvar um log apenas com os erros antes de deletar
+base_erros = zp[zp['flag_inconsistencia'] != ""]
+if not base_erros.empty:
+    base_erros.to_csv(r"grupos\03_Tetris\Miniprojeto_Limpeza\log_inconsistencias.csv", index=False, sep=';')
+
+# Limpeza efetiva: mantém apenas o que não tem flag [5]
+zp = zp[zp['flag_inconsistencia'] == ""].copy()
+zp = zp.drop(columns=['flag_inconsistencia'])
+
+# ============================================================
+# 10. COLUNAS DERIVADAS PARA ANÁLISE
+#    Objetivo: Criar colunas adicionais para facilitar análises temporais e segmentações.
+#    Exemplo: Ano e mês da venda, categoria de preço (baixo, médio, alto) com base no valor da caixa.
+# ============================================================
+print("10. Criando colunas derivadas para análise.")
+
+zp['ano_venda'] = zp['data_venda'].dt.year
+zp['mes_venda'] = zp['data_venda'].dt.month
+
+
+# ============================================================
+# 10.1 FORMATAÇÃO FINAL E EXPORTAÇÃO
+#   Objetivo: Garantir que a base final esteja pronta para análises e relatórios.
+#   Ações: Formatar datas para padrão ISO, garantir encoding UTF-8 e exportar para CSV.
+# ============================================================
+print("10.1. Formatando datas para padrão ISO e exportando CSV.")
+
+# Converte o objeto datetime para a string formatada exigida [3]
+zp['data_venda'] = zp['data_venda'].dt.strftime('%Y-%m-%d')
+
+# Exportação final em formato CSV com encoding UTF-8-SIG para compatibilidade com Excel Brasil
+caminho_saida = r"grupos\03_Tetris\Miniprojeto_Limpeza\vendas_limpo_Tetris.csv"
+zp.to_csv(caminho_saida, index=False, sep=';', encoding='utf-8-sig')
+
+print(f"Processo concluído! Arquivo salvo em: {caminho_saida}")
+
+# Verificar quantidade final de linhas após a limpeza
+total_final = len(zp)
+print(f"Quantidade de linhas após a limpeza: {total_final}")
+print(f"Linhas excluídas: {total_original-total_final}")
