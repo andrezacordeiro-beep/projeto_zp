@@ -5,6 +5,7 @@
 import pandas as pd
 import numpy as np
 from datetime import datetime
+import re
 
 """Modulos necessários do Python
 - Pandas
@@ -17,6 +18,9 @@ Regras Principais:
     - Conversão de valores negativos.
     - Imputação de valores padrão para campos vazios (Data, Região, Canal, Produto).
     - Descarte de vendas com valor zero ou fora do range financeiro.
+    - Retirar as regiões indesejadas (Montevidéu, Desconhecido, 
+    Sudeste, Sul, Nordeste, Centro-Oeste, Norte).
+    - Retirada de produto "Caixa De 100".
 """
 
 print("Iniciando o processo de limpeza de dados do Grupo Tetris.")
@@ -39,6 +43,26 @@ zp["id_venda"] = (
     .astype(str)
     .str.strip()
 ) # Converte para string e remove espaços extras
+
+
+  #Remove caracteres inválidos, limpa espaços e padroniza o formato:Exemplo: 123 -> VND00123
+print = "1.1 Mantém apenas prefixo e números."
+
+prefixo = print; "VND"
+numeros = re.sub(r'\D', '', zp)  # Aqui removemos qualquer caractere que não seja número para reconstruir o ID
+tamanho_total= (prefixo + numeros) # tamanho_total considera o prefixo + números
+
+def id_venda(prefixo, numeros):
+     
+# Retorna original se não houver números para processar    
+    if not numeros:
+     print(id_venda)  
+    
+ # Formata com prefixo e preenchimento de zeros (zfill)
+ 
+tamanho_numeros = tamanho_total - len(prefixo)
+id_venda = f"{prefixo}{numeros.zfill(tamanho_numeros)}"
+print= (id_venda)
 
 # ============================================================
 # 2. SANEAMENTO FINANCEIRO (valor_R$_cx)
